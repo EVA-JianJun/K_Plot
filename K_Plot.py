@@ -3,6 +3,8 @@
 """ 画K好看的线图 """
 # 依赖mpl_finance qbstyles
 import math
+import time
+import threading
 import traceback
 from qbstyles import mpl_style
 import matplotlib.pyplot as plt
@@ -19,13 +21,18 @@ class K_Plot():
         """ 初始化 """
         # ************ 系统变量 ************
         # 事发第一次触发回调模式不触发逻辑,这是由于用户最大化会触发回调
-        self.show_k_info_motion_is_first_flag = True
-        self.show_position_price_motion_is_first_flag = True
+        self._show_k_info_motion_is_first_flag = True
+        self._show_position_price_motion_is_first_flag = True
+
+        # 自动画图结束flag
+        self._stop_auot_plot_flag = False
+
+        # 画图锁
+        self._plot_lock = threading.Lock()
+        # 更新图锁
+        self._draw_idle_lock = threading.Lock()
 
         # ************ 作图变量 ************
-        # 开启动态作图
-        plt.ion()
-
         # 子图个数
         self.ax_num = ax_num
 
@@ -41,6 +48,11 @@ class K_Plot():
         elif self.ax_num == 4:
             self.fig, self.ax_list = plt.subplots(figsize=(10, 17), ncols=1, nrows=4)
 
+        # 开启动态作图
+        plt.ion()
+        # 显示图像
+        plt.show()
+
         # 设置窗口标题
         self.fig.canvas.set_window_title('K_Plot')
 
@@ -48,6 +60,11 @@ class K_Plot():
         self.ax_variables_dict = dict()
         for ax in self.ax_list:
             self.ax_variables_dict[ax] = dict()
+
+        # 自动作图ax信息字典
+        self._auto_plot_ax_dict = dict()
+        for ax in self.ax_list:
+            self._auto_plot_ax_dict[ax] = dict()
 
         # 显示鼠标跟随十字线,这里需要创建变量名不同的变量,不然只会显示一个
         self._cursor_list = list()
@@ -64,113 +81,118 @@ class K_Plot():
         self._get_next_ax_gen = generate_ax_list()
 
         # 绑定回调
-        self.band_action()
+        self._band_action()
 
     def plot_k(self, df, ax='Default'):
         """ 在ax子图上画k线 """
-        if ax == 'Default':
-            # 如果用户未指定,就使用生成器生成一个
-            ax = next(self._get_next_ax_gen)
+        self._plot_lock.acquire()
+        try:
+            if ax == 'Default':
+                # 如果用户未指定,就使用生成器生成一个
+                ax = next(self._get_next_ax_gen)
 
-        # 先清空ax,可以重复的画图
-        ax.cla()
+            # 先清空ax,可以重复的画图
+            ax.cla()
 
-        # 构造candlestick_ohlc需求的数据列表
-        quotes = []
-        for i in range(len(df)):
-            quotes.append([i, df.iloc[i].open, df.iloc[i].high, df.iloc[i].low, df.iloc[i].close])
+            # 构造candlestick_ohlc需求的数据列表
+            quotes = []
+            for i in range(len(df)):
+                quotes.append([i, df.iloc[i].open, df.iloc[i].high, df.iloc[i].low, df.iloc[i].close])
 
-        # 横轴名称, 取了数据时间序列
-        index = df.index
+            # 横轴名称, 取了数据时间序列
+            index = df.index
 
-        # 最新时间
-        last_eob = index[-1]
+            # 最新时间
+            last_eob = index[-1]
 
-        # 合约代码
-        symbol = df.symbol[0].decode()
-        # 合约周期
-        frequency = df.frequency[0]
-        # k线根数
-        k_num = len(df)
+            # 合约代码
+            symbol = df.symbol[0].decode()
+            # 合约周期
+            frequency = df.frequency[0]
+            # k线根数
+            k_num = len(df)
 
-        # 设置表标题
-        ax.set_title(symbol, fontdict = {'size': 16})
+            # 设置表标题
+            ax.set_title(symbol, fontdict = {'size': 16})
 
-        # 横轴内容提取函数
-        def format_date(x, pos=None):
-            if x<0 or x>len(index)-1:
-                return ''
-            return index[int(x)]
+            # 横轴内容提取函数
+            def format_date(x, pos=None):
+                if x<0 or x>len(index)-1:
+                    return ''
+                return index[int(x)]
 
-        # 显示表格
-        ax.grid(True)
-        # 每个格子里面显示7跟k线
-        ax.xaxis.set_major_locator(ticker.MultipleLocator(math.floor(k_num/6)))
-        # 设置横坐标显示内容提取函数
-        ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
+            # 显示表格
+            ax.grid(True)
+            # 每个格子里面显示7跟k线
+            ax.xaxis.set_major_locator(ticker.MultipleLocator(math.floor(k_num/6)))
+            # 设置横坐标显示内容提取函数
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
 
-        # 在ax里画k线图
-        #  candlestick_ohlc_list = candlestick_ohlc(ax, quotes, colordown='#00F0F0', colorup='#ff1717', width=0.4)
-        candlestick_ohlc(ax, quotes, colordown='#00F0F0', colorup='#ff1717', width=0.4)
+            # 在ax里画k线图
+            #  candlestick_ohlc_list = candlestick_ohlc(ax, quotes, colordown='#00F0F0', colorup='#ff1717', width=0.4)
+            candlestick_ohlc(ax, quotes, colordown='#00F0F0', colorup='#ff1717', width=0.4)
 
-        # 添加十字线,这里必须保存这个变量,或者用不同的变量名,不然子图只会显示一个十字线
-        self._cursor_list.append(Cursor(ax, useblit=True, color='w', linewidth=1))
+            # 添加十字线,这里必须保存这个变量,或者用不同的变量名,不然子图只会显示一个十字线
+            self._cursor_list.append(Cursor(ax, useblit=True, color='w', linewidth=1))
 
-        # 使用transform来指定text在图片中的相对位置
-        # 显示在左上角
-        # 显示k线根数
-        #  k_num_ax_text = ax.text(0.02, 0.93, 'Num: {0}'.format(k_num), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
-        k_num_ax_text = ax.text(0.86, 1.06, 'Num: {0}'.format(k_num), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
-        # 显示k线周期
-        frequency_ax_text = ax.text(0.86, 1.02, 'frequency: {0}'.format(frequency), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
-        # 显示最新时间
-        ax.text(0.77, 0.01, 'last eob: {0}'.format(last_eob), transform=ax.transAxes, fontdict = {'size': 9, 'color': 'w'})
+            # 使用transform来指定text在图片中的相对位置
+            # 显示在左上角
+            # 显示k线根数
+            #  k_num_ax_text = ax.text(0.02, 0.93, 'Num: {0}'.format(k_num), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
+            k_num_ax_text = ax.text(0.86, 1.06, 'Num: {0}'.format(k_num), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
+            # 显示k线周期
+            frequency_ax_text = ax.text(0.86, 1.02, 'frequency: {0}'.format(frequency), transform=ax.transAxes, fontdict = {'size': 10, 'color': 'w'})
+            # 显示最新时间
+            ax.text(0.77, 0.01, 'last eob: {0}'.format(last_eob), transform=ax.transAxes, fontdict = {'size': 9, 'color': 'w'})
 
-        # 显示k线信息文本,初始化显示为空
-        # 取最新的k
-        last_k = df.iloc[-1]
-        # 获取开高低收
-        Open = last_k.open
-        High = last_k.high
-        Low = last_k.low
-        Close = last_k.close
-        Volume = last_k.volume
-        Amount = last_k.amount
-        eob = last_k.eob
+            # 显示k线信息文本,初始化显示为空
+            # 取最新的k
+            last_k = df.iloc[-1]
+            # 获取开高低收
+            Open = last_k.open
+            High = last_k.high
+            Low = last_k.low
+            Close = last_k.close
+            Volume = last_k.volume
+            Amount = last_k.amount
+            eob = last_k.eob
 
-        k_info_text = 'Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
-            .format(Open, High, Low, Close, Volume, Amount, eob)
-        position_price_ax_text = ax.text(0.01, 0.02, k_info_text, transform=ax.transAxes, fontdict={'size': 8, 'color': 'w'})
+            k_info_text = 'Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
+                .format(Open, High, Low, Close, Volume, Amount, eob)
+            position_price_ax_text = ax.text(0.01, 0.02, k_info_text, transform=ax.transAxes, fontdict={'size': 8, 'color': 'w'})
 
-        # 显示用户鼠标点击的点
-        position_price_pos_ax_text = ax.text(round(k_num/2), df.close.mean(), '', fontdict={'size': 10, 'color': 'y'})
+            # 显示用户鼠标点击的点
+            position_price_pos_ax_text = ax.text(round(k_num/2), df.close.mean(), '', fontdict={'size': 10, 'color': 'y'})
 
-        # 解决横坐标过多的问题, 这里每5个横坐标显示一次
-        xtick_num = round(len(ax.get_xticklabels()) / 5)
-        continue_time = 0
-        for label in ax.get_xticklabels():
-            continue_time += 1
-            if continue_time % xtick_num == 0:
-                # 这些保留下来, 其他的都隐藏掉
-                continue
-            label.set_visible(False)
+            # 解决横坐标过多的问题, 这里每5个横坐标显示一次
+            xtick_num = round(len(ax.get_xticklabels()) / 5)
+            continue_time = 0
+            for label in ax.get_xticklabels():
+                continue_time += 1
+                if continue_time % xtick_num == 0:
+                    # 这些保留下来, 其他的都隐藏掉
+                    continue
+                label.set_visible(False)
 
-        # 保存变量信息
-        self.ax_variables_dict[ax]['index'] = index
-        self.ax_variables_dict[ax]['symbol'] = symbol
-        self.ax_variables_dict[ax]['frequency'] = frequency
-        self.ax_variables_dict[ax]['k_num'] =k_num
-        self.ax_variables_dict[ax]['df'] = df
-        #  self.ax_variables_dict[ax]['candlestick_ohlc_list'] = candlestick_ohlc_list
-        self.ax_variables_dict[ax]['k_num_ax_text'] = k_num_ax_text
-        self.ax_variables_dict[ax]['frequency_ax_text'] = frequency_ax_text
-        self.ax_variables_dict[ax]['position_price_ax_text'] = position_price_ax_text
-        self.ax_variables_dict[ax]['position_price_pos_ax_text'] = position_price_pos_ax_text
+            # 保存变量信息
+            self.ax_variables_dict[ax]['index'] = index
+            self.ax_variables_dict[ax]['symbol'] = symbol
+            self.ax_variables_dict[ax]['frequency'] = frequency
+            self.ax_variables_dict[ax]['k_num'] =k_num
+            self.ax_variables_dict[ax]['df'] = df
+            #  self.ax_variables_dict[ax]['candlestick_ohlc_list'] = candlestick_ohlc_list
+            self.ax_variables_dict[ax]['k_num_ax_text'] = k_num_ax_text
+            self.ax_variables_dict[ax]['frequency_ax_text'] = frequency_ax_text
+            self.ax_variables_dict[ax]['position_price_ax_text'] = position_price_ax_text
+            self.ax_variables_dict[ax]['position_price_pos_ax_text'] = position_price_pos_ax_text
 
-        # 保存当前的k线坐标, 默认为0
-        self.ax_variables_dict[ax]['x_position'] = 0
+            # 保存当前的k线坐标, 默认为0
+            self.ax_variables_dict[ax]['x_position'] = 0
 
-    def get_ax(self, x, y):
+        finally:
+            self._plot_lock.release()
+
+    def _get_ax(self, x, y):
         """ 根据屏幕坐标获取当前的ax """
         if self.ax_num == 1:
             # 1
@@ -190,13 +212,17 @@ class K_Plot():
                 # ax1
                 return self.ax_list[0]
 
-    def band_action(self):
+    def _band_action(self):
         """ 绑定用户操作回调函数 """
         def show_k_info_motion(event):
             """ 鼠标移动显示k线信息 """
             try:
-                if self.show_k_info_motion_is_first_flag:
-                    self.show_k_info_motion_is_first_flag = False
+                if self._show_k_info_motion_is_first_flag:
+                    self._show_k_info_motion_is_first_flag = False
+                    return
+
+                if event.button != 1:
+                    # 如果按下的不是左键就退出
                     return
 
                 # 获取当前横坐标向下取整就是数据的索引
@@ -204,7 +230,7 @@ class K_Plot():
                     return
 
                 # 获取当前ax
-                current_ax = self.get_ax(event.x, event.y)
+                current_ax = self._get_ax(event.x, event.y)
 
                 # 获取当前ax的信息字典
                 ax_variables = self.ax_variables_dict[current_ax]
@@ -216,7 +242,11 @@ class K_Plot():
                     return
 
                 # 取上一次的k线坐标
-                last_x_position = ax_variables['x_position']
+                try:
+                    last_x_position = ax_variables['x_position']
+                except KeyError:
+                    # 如果当前ax未作图,会触发KeyError异常
+                    return
                 if x_position == last_x_position:
                     # 如果现在的k线坐标没有发生改变,就忽略本次运行
                     return
@@ -250,8 +280,12 @@ class K_Plot():
                 position_price_ax_text.set_text('Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
                     .format(Open, High, Low, Close, Volume, Amount, eob))
 
-                # 更新图像
-                self.fig.canvas.draw_idle()
+                self._draw_idle_lock.acquire()
+                try:
+                    # 更新图像
+                    self.fig.canvas.draw_idle()
+                finally:
+                    self._draw_idle_lock.release()
 
             except Exception as err:
                 # 有时候取到的是ax外,取值返回None出错
@@ -261,8 +295,12 @@ class K_Plot():
         def show_position_price_motion(event):
             """ 鼠标点击显示当前坐标点的价格 """
             try:
-                if self.show_position_price_motion_is_first_flag:
-                    self.show_position_price_motion_is_first_flag = False
+                if self._show_position_price_motion_is_first_flag:
+                    self._show_position_price_motion_is_first_flag = False
+                    return
+
+                if event.button != 3:
+                    # 如果按下的不是右键就退出
                     return
 
                 # 获取当前横坐标向下取整就是数据的索引
@@ -273,7 +311,7 @@ class K_Plot():
                 position_price = event.ydata
 
                 # 获取当前ax
-                current_ax = self.get_ax(event.x, event.y)
+                current_ax = self._get_ax(event.x, event.y)
 
                 # 获取当前ax的信息字典
                 ax_variables = self.ax_variables_dict[current_ax]
@@ -286,8 +324,12 @@ class K_Plot():
                 # 设置坐标点图案
                 position_price_pos_ax_text.set_text('♦ {0:.3f}'.format(position_price))
 
-                # 更新图像
-                self.fig.canvas.draw_idle()
+                self._draw_idle_lock.acquire()
+                try:
+                    # 更新图像
+                    self.fig.canvas.draw_idle()
+                finally:
+                    self._draw_idle_lock.release()
 
             except Exception as err:
                 # 有时候取到的是ax外,取值返回None出错
@@ -296,14 +338,96 @@ class K_Plot():
 
         def motion_debug(event):
             """ DEBUG 用户事件 """
-            print("x: {0} y: {1}".format(event.x, event.y))
+            self.event = event
 
         # 绑定鼠标点击回调
         #  self.fig.canvas.mpl_connect('button_press_event', motion_debug)
         self.fig.canvas.mpl_connect('button_press_event', show_position_price_motion)
-        self.fig.canvas.mpl_connect('motion_notify_event', show_k_info_motion)
+        # 鼠标移动就检测一是太占cpu资源,二是有时候不需要更改价格,只需要显示最新价,就取消了
+        #  self.fig.canvas.mpl_connect('motion_notify_event', show_k_info_motion)
+        # 改为按下鼠标左键
+        self.fig.canvas.mpl_connect('button_press_event', show_k_info_motion)
 
-    def show_pic(self):
-        """ 显示画布 """
-        # 显示图像
-        plt.show()
+    def band_df_func(self, df_func, frequency, fix=5, ax='Default'):
+        """[summary]
+            绑定用户函数
+
+        [description]
+            绑定一个获取df的函数,并根据k线周期在+fix后自动运行函数刷新数据并在ax上作图
+
+        Parameters
+        ----------
+        df_func : {[function]}
+            [description]
+                获取df的函数,该函数不接受任何参数,并根据当前时间返回最新的k线df
+        frequency : {[int]}
+            [description]
+                该函数获取的k线的周期,单位秒s,类似int
+        fix : {number}, optional
+            [description] (the default is 5, which [default_description])
+                自动刷新数据不会在整点运行,会在整点加fix秒运行
+        ax : {str}, optional
+            [description] (the default is 'Default', which [default_description])
+                该数据显示的ax,不传入ax的话系统默认分配下一个ax,并循环重复覆盖使用
+        """
+
+        if ax == 'Default':
+            # 如果用户未指定,就使用生成器生成一个
+            ax = next(self._get_next_ax_gen)
+
+        try:
+            auto_plot_ax_info = self._auto_plot_ax_dict[ax]
+        except KeyError:
+            print("\033[0;36;41m指定的ax错误!\033[0m")
+            return
+
+        # 保存数据
+        auto_plot_ax_info['df_func'] = df_func
+        auto_plot_ax_info['frequency'] = frequency
+        auto_plot_ax_info['fix'] = fix
+
+        def auto_plot(ax):
+            # 到时间自动画图,死循环一直画
+            while True:
+                try:
+                    if self._stop_auot_plot_flag:
+                        print("退出!")
+                        return
+                    # 获取自动画图ax信息
+                    auto_plot_ax_info = self._auto_plot_ax_dict[ax]
+                    # 获取用户画图函数
+                    df_func = auto_plot_ax_info['df_func']
+                    # 获取频率
+                    frequency = auto_plot_ax_info['frequency']
+                    # 获取fix
+                    fix = auto_plot_ax_info['fix']
+
+                    # 画图
+                    df = df_func()
+                    self.plot_k(df, ax)
+
+                    # 获取当前时间
+                    now_ts = time.time()
+                    # 计算下次运行需要等待的时间
+                    next_time_sleep = frequency - (now_ts % frequency) + fix
+                    print(next_time_sleep)
+                    # 等待
+                    time.sleep(next_time_sleep)
+                except Exception as err:
+                    print("\033[0;36;41m自动更新作图错误!\033[0m")
+                    traceback.print_exc()
+                    print(err)
+        try:
+            # 先试着取下看看是不是已经有自动画图线程了
+            auto_plot_ax_info['auto_plot_th']
+        except KeyError:
+            # 表示没创建过,那么创建新的
+            # 启动自动画图线程
+            auto_plot_th = threading.Thread(target=auto_plot, args=(ax,))
+            auto_plot_th.start()
+            # 然后保存这个变量
+            auto_plot_ax_info['auto_plot_th'] = auto_plot_th
+
+    def stop_auot_plot(self):
+        """ 停止自动作图 """
+        self._stop_auot_plot_flag = True
