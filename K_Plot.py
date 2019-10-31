@@ -133,7 +133,7 @@ class K_Plot():
             candlestick_ohlc(ax, quotes, colordown='#00F0F0', colorup='#ff1717', width=0.4)
 
             # 添加十字线,这里必须保存这个变量,或者用不同的变量名,不然子图只会显示一个十字线
-            self._cursor_list.append(Cursor(ax, useblit=True, color='w', linewidth=1))
+            #  self._cursor_list.append(Cursor(ax, useblit=True, color='w', linewidth=1))
 
             # 使用transform来指定text在图片中的相对位置
             # 显示在左上角
@@ -157,9 +157,16 @@ class K_Plot():
             Amount = last_k.amount
             eob = last_k.eob
 
+            # 开高低收等信息
             k_info_text = 'Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
                 .format(Open, High, Low, Close, Volume, Amount, eob)
-            position_price_ax_text = ax.text(0.01, 0.02, k_info_text, transform=ax.transAxes, fontdict={'size': 8, 'color': 'w'})
+            position_price_ax_text = ax.text(0.01, 0.04, k_info_text, transform=ax.transAxes, fontdict={'size': 9, 'color': 'w'})
+
+            # 当前显示的k线x坐标,默认显示最新一根
+            x_position = len(df) - 1
+
+            # 显示当前k线位置标记,默认显示最新一根的上面,减0.5进行位置修正
+            k_position_code_ax_text = ax.text(x_position - .5, High, '▼', fontdict={'size': 8, 'color': 'lime'})
 
             # 显示用户鼠标点击的点
             position_price_pos_ax_text = ax.text(round(k_num/2), df.close.mean(), '', fontdict={'size': 10, 'color': 'y'})
@@ -185,9 +192,10 @@ class K_Plot():
             self.ax_variables_dict[ax]['frequency_ax_text'] = frequency_ax_text
             self.ax_variables_dict[ax]['position_price_ax_text'] = position_price_ax_text
             self.ax_variables_dict[ax]['position_price_pos_ax_text'] = position_price_pos_ax_text
+            self.ax_variables_dict[ax]['k_position_code_ax_text'] = k_position_code_ax_text
 
             # 保存当前的k线坐标, 默认为0
-            self.ax_variables_dict[ax]['x_position'] = 0
+            self.ax_variables_dict[ax]['x_position'] = x_position
 
         finally:
             self._plot_lock.release()
@@ -215,7 +223,7 @@ class K_Plot():
     def _band_action(self):
         """ 绑定用户操作回调函数 """
         def show_k_info_motion(event):
-            """ 鼠标移动显示k线信息 """
+            """ 鼠标点击显示k线信息 """
             try:
                 if self._show_k_info_motion_is_first_flag:
                     self._show_k_info_motion_is_first_flag = False
@@ -235,8 +243,8 @@ class K_Plot():
                 # 获取当前ax的信息字典
                 ax_variables = self.ax_variables_dict[current_ax]
 
-                # 当前k线坐标
-                x_position = math.floor(event.xdata)
+                # 当前k线坐标, 加0.3进行修正
+                x_position = math.floor(event.xdata + 0.3)
                 if x_position < 0:
                     # 鼠标移动到了图的最左端左边,超出索引
                     return
@@ -258,7 +266,7 @@ class K_Plot():
                 df_data = ax_variables['df']
 
                 try:
-                    # 这里的df只是祛除了一行
+                    # 这里的df只是取了一行
                     df = df_data.iloc[x_position]
                 except IndexError:
                     # 如果用户鼠标移动到了图像的最右边并点击,这个时候索引会超出df的大小,报这个错误,忽略就可以了
@@ -279,6 +287,11 @@ class K_Plot():
                 # 设置k线价格信息
                 position_price_ax_text.set_text('Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
                     .format(Open, High, Low, Close, Volume, Amount, eob))
+
+                # 当前k线位置标记
+                k_position_code_ax_text = ax_variables['k_position_code_ax_text']
+
+                k_position_code_ax_text.set_position((x_position - .5, High))
 
                 self._draw_idle_lock.acquire()
                 try:
@@ -320,7 +333,7 @@ class K_Plot():
                 position_price_pos_ax_text = ax_variables['position_price_pos_ax_text']
 
                 # 设置坐标点位置,减0.8是修正显示的误差
-                position_price_pos_ax_text.set_position((event.xdata - 0.8, event.ydata - 0.8))
+                position_price_pos_ax_text.set_position((event.xdata - 0.8, event.ydata))
                 # 设置坐标点图案
                 position_price_pos_ax_text.set_text('♦ {0:.3f}'.format(position_price))
 
@@ -336,19 +349,111 @@ class K_Plot():
                 traceback.print_exc()
                 print(err)
 
+        def move_k_info_motion(event):
+            """ 键盘左右按键移动显示k线信息 """
+            try:
+                # 获取当前横坐标向下取整就是数据的索引
+                if event.xdata is None:
+                    return
+
+                # 获取当前ax
+                current_ax = self._get_ax(event.x, event.y)
+
+                # 获取当前ax的信息字典
+                ax_variables = self.ax_variables_dict[current_ax]
+
+                # 取上一次的k线坐标
+                try:
+                    last_x_position = ax_variables['x_position']
+                except KeyError:
+                    # 如果当前ax未作图,会触发KeyError异常
+                    return
+
+                # 根据用户按键移动k线价格坐标
+                if event.key == 'left':
+                    if last_x_position == 0:
+                        # 如果原来的坐标在第一根k线上,那么就不再继续了
+                        return
+                    new_x_position = last_x_position - 1
+                elif event.key == 'right':
+                    new_x_position = last_x_position + 1
+                else:
+                    # 其他情况退出
+                    return
+
+                print(last_x_position, new_x_position)
+
+                # 取出对应的df
+                df_data = ax_variables['df']
+
+                try:
+                    # 这里的df只是取了一行
+                    df = df_data.iloc[new_x_position]
+                except IndexError:
+                    # 如果用户鼠标移动到了图像的最右边并点击,这个时候索引会超出df的大小,报这个错误,忽略就可以了
+                    return
+
+                # 获取开高低收
+                Open = df.open
+                High = df.high
+                Low = df.low
+                Close = df.close
+                Volume = df.volume
+                Amount = df.amount
+                eob = df.eob
+
+                # 获取坐标价格text控件
+                position_price_ax_text = ax_variables['position_price_ax_text']
+
+                # 设置k线价格信息
+                position_price_ax_text.set_text('Open:  {0: >25.0f}\nHigh:   {1: >25.0f}\nLow:    {2: >25.0f}\nClose:  {3: >25.0f}\nVolume: {4: >23}\nAmount: {5: >18.0f}\neob: {6}'\
+                    .format(Open, High, Low, Close, Volume, Amount, eob))
+
+                # 当前k线位置标记
+                k_position_code_ax_text = ax_variables['k_position_code_ax_text']
+
+                k_position_code_ax_text.set_position((new_x_position - .5, High))
+
+                self._draw_idle_lock.acquire()
+                try:
+                    # 更新图像
+                    self.fig.canvas.draw_idle()
+                finally:
+                    self._draw_idle_lock.release()
+
+                # 更新k线坐标
+                ax_variables['x_position'] = new_x_position
+
+            except Exception as err:
+                # 有时候取到的是ax外,取值返回None出错
+                traceback.print_exc()
+                print(err)
+
         def motion_debug(event):
             """ DEBUG 用户事件 """
             self.event = event
+            print("event.name: ", event.name)
+            print("event.key: ", event.key)
+            print("event.x: ", event.x)
+            print("event.y: ", event.y)
+            print("event.xdata: ", event.xdata)
+            print("event.ydata: ", event.ydata)
 
-        # 绑定鼠标点击回调
+        # DEBUG 回调测试
+        # 键盘按键测试
+        #  self.fig.canvas.mpl_connect('key_press_event', motion_debug)
+        # 鼠标按键测试
         #  self.fig.canvas.mpl_connect('button_press_event', motion_debug)
+
+        """ 绑定鼠标点击回调 """
+        # 按下右键标注当前鼠标位置的价格信息
         self.fig.canvas.mpl_connect('button_press_event', show_position_price_motion)
-        # 鼠标移动就检测一是太占cpu资源,二是有时候不需要更改价格,只需要显示最新价,就取消了
-        #  self.fig.canvas.mpl_connect('motion_notify_event', show_k_info_motion)
-        # 改为按下鼠标左键
+        # 按下鼠标左键显示当前k线的信息
         self.fig.canvas.mpl_connect('button_press_event', show_k_info_motion)
 
-    def band_df_func(self, df_func, frequency, fix=5, ax='Default'):
+        self.fig.canvas.mpl_connect('key_press_event', move_k_info_motion)
+
+    def band_df_func(self, df_func, frequency, fix=3, ax='Default'):
         """[summary]
             绑定用户函数
 
@@ -410,7 +515,7 @@ class K_Plot():
                     now_ts = time.time()
                     # 计算下次运行需要等待的时间
                     next_time_sleep = frequency - (now_ts % frequency) + fix
-                    print(next_time_sleep)
+                    print("{0}s后更新.".format(next_time_sleep))
                     # 等待
                     time.sleep(next_time_sleep)
                 except Exception as err:
