@@ -47,6 +47,22 @@ class K_Plot():
             self.ax_list = [ax]
         elif self.ax_num == 4:
             self.fig, self.ax_list = plt.subplots(figsize=(10, 17), ncols=1, nrows=4)
+#
+        self.win = self.fig.canvas.manager.window
+
+        """ 注册自动刷新图像功能 """
+        # 由于作图最小周期默认为15s,且默认fix为3,我们这里取了15s的最小周期并使用稍大的fix=5
+        auto_frequency = 15
+        auto_fix = 5
+        # 获取当前时间
+        now_ts = time.time()
+        # 计算下次运行需要等待的时间,由于win.after函数只能接受整数,所以这里要取整
+        next_time_sleep = math.floor(auto_frequency - (now_ts % auto_frequency) + auto_fix)
+        # next_time_sleep后应该刷新图像,之后每隔auto_frequency后刷新一次
+        for i in range(5760):
+            # 24个小时循环调用
+            sleep_time = next_time_sleep + i * auto_frequency
+            exec("self.win.after({0} * 1000, self._tell_draw_idle)".format(sleep_time))
 
         # 开启动态作图
         plt.ion()
@@ -453,6 +469,20 @@ class K_Plot():
 
         self.fig.canvas.mpl_connect('key_press_event', move_k_info_motion)
 
+    def _tell_draw_idle(self):
+        """ 告诉TkAgg后端作图的函数 """
+        # Tkinter是单线程的,如果在多线程中调用就会出错
+        # RuntimeError: main thread is not in main loop
+        self._draw_idle_lock.acquire()
+        try:
+            if self._stop_auot_plot_flag:
+                return
+            # 更新图像
+            self.fig.canvas.draw_idle()
+        finally:
+            self._draw_idle_lock.release()
+        print('draw_idle!')
+
     def band_df_func(self, df_func, frequency, fix=3, ax='Default'):
         """[summary]
             绑定用户函数
@@ -522,6 +552,8 @@ class K_Plot():
                     print("\033[0;36;41m自动更新作图错误!\033[0m")
                     traceback.print_exc()
                     print(err)
+                    # 出错就退出,不然会一直出错
+                    return
         try:
             # 先试着取下看看是不是已经有自动画图线程了
             auto_plot_ax_info['auto_plot_th']
