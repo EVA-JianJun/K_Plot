@@ -566,7 +566,7 @@ class K_Plot():
             while True:
                 try:
                     if self._stop_auot_plot_flag:
-                        print("退出!")
+                        self._my_logging.print("退出!")
                         return
                     # 获取自动画图ax信息
                     auto_plot_ax_info = self._auto_plot_ax_dict[ax]
