@@ -11,6 +11,14 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.widgets import Cursor
 from mpl_finance import candlestick_ohlc
+"""
+有个不想处理的bug:
+如果才开始画的图为300s的,然后重复调用了band_df_func函数,
+绑定了60s的数据,那么60s的数据不会刷新,需要等300s后线程调用plot_k函数后
+下次开始周期才会变成60s,对于这种问题,如果需要换图像,从大周期向小周期换
+先stop掉实例,然后新建实例就可以了,也不是debug不掉,懒得写,反正新建就完事了
+速度快的,记得之前把原来的实例给我stop掉,不然会支持报错,也不影响使用,只是看着难受
+"""
 
 # 使用qbstyles风格, 也可以换成其他的
 mpl_style(dark=True)
@@ -103,7 +111,7 @@ class K_Plot():
         self._cursor_list = list()
 
         # 调整子图间距, 百分比
-        plt.subplots_adjust(top=0.95, bottom=0.02, hspace=0.25)
+        plt.subplots_adjust(top=0.97, bottom=0.02, hspace=0.23, left=0.1, right=0.95)
 
         # 创建ax列表生成器
         def generate_ax_list():
@@ -297,7 +305,7 @@ class K_Plot():
                     # 其他情况退出
                     return
 
-                print(last_x_position, new_x_position)
+                self._my_logging.print(last_x_position, new_x_position)
 
                 # 取出对应的df
                 df_data = ax_variables['df']
