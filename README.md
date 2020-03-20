@@ -34,7 +34,7 @@
                 sleep_time = next_time_sleep + i * auto_frequency
                 exec("self._after_func_id_list.append(self.win.after({0} * 1000,     self._tell_draw_idle))".format(sleep_time))
 
-然后很傻的定期定时运行了24个小时，不过效果确实达到了，所以如果要后续动态修改什么，请多做做尝试。
+然后很傻的定期定时运行了~~(24个小时)~~七天，不过效果确实达到了，所以如果要后续动态修改什么，请多做做尝试。
 
 对了，K_Plot是可以在ipython中使用的，注意把df的格式换成你的就可以了，目前只是观察调试使用不占资源，如果是对性能有要求的地方最好不要启动任何的gui，一是阻塞的问题，二是稳定性的问题，三是占资源，特别matplotlib动态作图效率真的差。
 
