@@ -10,7 +10,8 @@ from qbstyles import mpl_style
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.widgets import Cursor
-from mpl_finance import candlestick_ohlc
+# from mpl_finance import candlestick_ohlc
+from mplfinance.original_flavor import candlestick_ohlc
 """
 有个不想处理的bug:
 如果才开始画的图为300s的,然后重复调用了band_df_func函数,
